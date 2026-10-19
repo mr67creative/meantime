@@ -1,0 +1,100 @@
+import { z } from "zod";
+import {
+  AD_COPY_LIMITS,
+  PLATFORM_IDS,
+  TELEMETRY,
+} from "./constants.js";
+
+export const platformIdSchema = z.enum(PLATFORM_IDS);
+
+export const pohiSignalsSchema = z.object({
+  inputInteractionScore: z.number().min(0).max(1),
+  keystrokeCount: z.number().int().min(0).max(10_000),
+  trustedPasteSeen: z.boolean(),
+  aiMutationVerified: z.boolean(),
+});
+
+export const impressionEventSchema = z.object({
+  impressionId: z.string().uuid(),
+  leaseToken: z.string().min(16).max(2048),
+  platform: z.string().min(1).max(32),
+  placement: z.enum(["under_prompt", "thinking_indicator", "ai_footer"]),
+  displayMode: z.enum(["wait_time_only", "persist_until_5s"]),
+  submittedAt: z.number().int().positive(),
+  aiWaitDurationMs: z.number().min(0).max(600_000),
+  cumulativeVisibleMs: z.number().min(0).max(600_000),
+  closedReason: z.enum([
+    "stream_started",
+    "earned",
+    "dismissed",
+    "snoozed",
+    "navigated",
+    "superseded",
+  ]),
+  earned: z.boolean(),
+  pohi: pohiSignalsSchema,
+  promptsLastHour: z.number().int().min(0).max(100_000),
+});
+
+export const telemetryBatchSchema = z.object({
+  batchId: z.string().uuid(),
+  deviceId: z.string().min(8).max(128),
+  extensionVersion: z.string().max(32),
+  sentAt: z.number().int().positive(),
+  events: z.array(impressionEventSchema).min(1).max(TELEMETRY.MAX_EVENTS_PER_BATCH),
+});
+
+export const prefetchRequestSchema = z.object({
+  deviceId: z.string().min(8).max(128),
+  count: z.number().int().min(1).max(25),
+  platforms: z.array(z.string().max(32)).max(8).default([]),
+});
+
+export const campaignInputSchema = z.object({
+  name: z.string().min(2).max(80),
+  headline: z.string().min(4).max(AD_COPY_LIMITS.HEADLINE_MAX),
+  bodyText: z.string().min(10).max(AD_COPY_LIMITS.BODY_MAX),
+  ctaText: z.string().min(2).max(AD_COPY_LIMITS.CTA_MAX),
+  targetUrl: z.string().url().max(512),
+  dailyBudgetMicro: z.number().int().positive().max(1_000_000_000_000),
+  cpiMicro: z.number().int().positive().max(100_000_000),
+  targetPlatforms: z.array(z.string().max(32)).min(1).max(8),
+  maxPerDayPerUser: z.number().int().min(1).max(20).default(3),
+  cooldownSec: z.number().int().min(0).max(86_400).default(1800),
+});
+
+export const registerUserSchema = z.object({
+  email: z.string().email().max(254),
+  password: z.string().min(10).max(128),
+  displayName: z.string().min(1).max(60).optional(),
+  deviceId: z.string().min(8).max(128).optional(),
+  fingerprintHash: z.string().min(8).max(128).optional(),
+});
+
+export const loginSchema = z.object({
+  email: z.string().email().max(254),
+  password: z.string().min(1).max(128),
+  deviceId: z.string().min(8).max(128).optional(),
+  fingerprintHash: z.string().min(8).max(128).optional(),
+});
+
+export const taskSubmissionSchema = z.object({
+  taskType: z.enum(["x", "linkedin", "reddit", "chrome_web_store", "other"]),
+  postUrl: z.string().url().max(1024),
+});
+
+export const payoutRequestSchema = z.object({
+  method: z.enum(["paypal", "stripe_connect", "wise", "usdc", "usdt"]),
+  address: z.string().min(4).max(256),
+  amountMicro: z.number().int().positive(),
+});
+
+export const clickEventSchema = z.object({
+  impressionId: z.string().uuid(),
+  leaseToken: z.string().min(16).max(2048),
+});
+
+export type TelemetryBatchInput = z.infer<typeof telemetryBatchSchema>;
+export type ImpressionEventInput = z.infer<typeof impressionEventSchema>;
+export type PrefetchRequestInput = z.infer<typeof prefetchRequestSchema>;
+export type CampaignInputSchema = z.infer<typeof campaignInputSchema>;

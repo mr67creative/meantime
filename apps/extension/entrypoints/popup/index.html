@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MeanTime</title>
+    <style>
+      :root { color-scheme: light dark; }
+      * { box-sizing: border-box; }
+      body {
+        width: 340px; margin: 0; padding: 16px;
+        font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px;
+      }
+      h1 { font-size: 15px; margin: 0 0 2px; }
+      .sub { opacity: .65; margin: 0 0 14px; }
+      fieldset { border: 1px solid rgba(127,127,127,.3); border-radius: 8px; margin: 0 0 12px; padding: 10px 12px; }
+      legend { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .6; padding: 0 4px; }
+      label.mode { display: block; margin-bottom: 10px; cursor: pointer; }
+      label.mode:last-child { margin-bottom: 0; }
+      .mode-title { font-weight: 600; display: flex; align-items: center; gap: 6px; }
+      .mode-desc { margin: 3px 0 0 20px; opacity: .75; line-height: 1.45; }
+      .mode-desc.warn { color: #c98a00; }
+      select, button.action {
+        width: 100%; padding: 7px 9px; border-radius: 7px; font-size: 13px;
+        border: 1px solid rgba(127,127,127,.4); background: transparent; color: inherit;
+      }
+      button.action { cursor: pointer; margin-top: 8px; font-weight: 600; }
+      button.action:hover { background: rgba(127,127,127,.12); }
+      .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+      .stats { display: flex; gap: 8px; }
+      .stat { flex: 1; text-align: center; border: 1px solid rgba(127,127,127,.25); border-radius: 8px; padding: 8px 4px; }
+      .stat b { display: block; font-size: 16px; }
+      .stat span { font-size: 10px; opacity: .6; text-transform: uppercase; letter-spacing: .05em; }
+      .toggle { position: relative; width: 36px; height: 20px; }
+      .toggle input { opacity: 0; width: 100%; height: 100%; position: absolute; margin: 0; cursor: pointer; }
+      .toggle i { position: absolute; inset: 0; border-radius: 10px; background: rgba(127,127,127,.4); transition: background .15s; pointer-events: none; }
+      .toggle i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .15s; }
+      .toggle input:checked + i { background: #2e9e5b; }
+      .toggle input:checked + i::after { left: 18px; }
+      #snooze-state { font-size: 11px; opacity: .7; margin-top: 6px; }
+    </style>
+  </head>
+  <body>
+    <h1>MeanTime</h1>
+    <p class="sub">Micro-ads during AI wait time. You keep 55%.</p>
+
+    <div class="row">
+      <span><b>Ads enabled</b></span>
+      <span class="toggle"><input type="checkbox" id="enabled" /><i></i></span>
+    </div>
+    <div id="snooze-state"></div>
+
+    <fieldset>
+      <legend>Display mode</legend>
+      <label class="mode">
+        <span class="mode-title">
+          <input type="radio" name="displayMode" value="wait_time_only" />
+          Strict Wait-Time Only
+        </span>
+        <p class="mode-desc warn">
+          The ad disappears the instant the AI starts streaming. ⚠ If the AI
+          responds in under 5 seconds, the ad closes early and will not reach
+          the 5-second payout threshold.
+        </p>
+      </label>
+      <label class="mode">
+        <span class="mode-title">
+          <input type="radio" name="displayMode" value="persist_until_5s" />
+          Guaranteed 5s Persistence
+        </span>
+        <p class="mode-desc">
+          Recommended for earnings. If the AI answers faster than 5 seconds,
+          the ad stays anchored under your message until the 5-second view
+          timer completes, shows "✓ Earned", and fades out.
+        </p>
+      </label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Ad position</legend>
+      <select id="placement">
+        <option value="under_prompt">Below my prompt (action bar)</option>
+        <option value="thinking_indicator">Next to "Thinking…" indicator</option>
+        <option value="ai_footer">Below the AI response</option>
+      </select>
+    </fieldset>
+
+    <div class="stats">
+      <div class="stat"><b id="stat-cache">–</b><span>ads cached</span></div>
+      <div class="stat"><b id="stat-pending">–</b><span>pending sync</span></div>
+    </div>
+
+    <button class="action" id="open-dashboard">Open earnings dashboard</button>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

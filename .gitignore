@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.output/
+.wxt/
+.web-ext-artifacts/
+.turbo/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+drizzle/
+coverage/
