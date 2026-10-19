@@ -1,3 +1,62 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html {
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    @apply bg-white text-neutral-900;
+  }
+}
+
+@layer components {
+  /* One button system, three weights. */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium
+           transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2
+           focus-visible:outline-neutral-900 disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-neutral-900 text-white hover:bg-neutral-700;
+  }
+  .btn-outline {
+    @apply btn border border-neutral-300 text-neutral-900 hover:border-neutral-400 hover:bg-neutral-50;
+  }
+  .btn-ghost {
+    @apply btn text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900;
+  }
+
+  /* Quiet surfaces — a card is a border and a radius, not a gradient. */
+  .card {
+    @apply rounded-xl border border-neutral-200 bg-white;
+  }
+  .card-pad {
+    @apply card p-5;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900
+           placeholder:text-neutral-400 focus:border-neutral-900 focus:outline-none focus:ring-1 focus:ring-neutral-900;
+  }
+  .label {
+    @apply mb-1.5 block text-sm font-medium text-neutral-700;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
+  }
+
+  /* Status dots — color is an accent, never the layout. */
+  .dot {
+    @apply inline-block h-1.5 w-1.5 rounded-full;
+  }
+}
+
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}

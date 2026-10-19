@@ -23,5 +23,13 @@ services:
     ports:
       - "9000:9000"
       - "9001:9001"
+  # Laya: open-source, non-chat AI sidecar for content/proof moderation.
+  # Serves POST /v1/classify with { task, text?, url?, imageKey? } and returns
+  # { score, labels[], confidence }. Runs fully local — nothing leaves the box.
+  laya:
+    image: laya/laya:latest
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
 volumes:
   pgdata:

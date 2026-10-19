@@ -15,6 +15,7 @@ import { requireUser } from "../context.js";
 import { ACCOUNTS, postTransfer } from "../ledger.js";
 import { analyzeCadence, type CadenceFinding } from "../fraud/cadence.js";
 import { logFraud } from "../fraud/trust.js";
+import { clusterForIp } from "../geo.js";
 
 export async function telemetryRoutes(app: FastifyInstance, ctx: AppContext) {
   app.post("/telemetry/batch", async (req, reply) => {
@@ -23,6 +24,7 @@ export async function telemetryRoutes(app: FastifyInstance, ctx: AppContext) {
     const userId = auth.userId;
 
     const batch = telemetryBatchSchema.parse(req.body);
+    const geoCluster = clusterForIp(req.ip);
 
     // Pull the last hour of history for cadence analysis.
     const hourAgo = new Date(Date.now() - 3600_000);
@@ -61,7 +63,7 @@ export async function telemetryRoutes(app: FastifyInstance, ctx: AppContext) {
     let flagged = 0;
 
     for (const event of batch.events) {
-      const result = await processEvent(ctx, userId, batchRow.id, event, criticalFindings);
+      const result = await processEvent(ctx, userId, batchRow.id, event, criticalFindings, geoCluster);
       results.push(result);
       if (result.status === "verified") accepted++;
       if (result.status === "flagged") flagged++;
@@ -92,6 +94,7 @@ async function processEvent(
   batchId: string,
   event: ImpressionEvent,
   batchCriticalFindings: CadenceFinding[],
+  geoCluster: string,
 ): Promise<TelemetryEventResult> {
   const reasons: string[] = [];
 
@@ -206,7 +209,7 @@ async function processEvent(
       .where(eq(adLeases.id, lease.lid));
   }
 
-  await persist(ctx, batchId, userId, event, status, reasons, earnedMicro, campaignId);
+  await persist(ctx, batchId, userId, event, status, reasons, earnedMicro, campaignId, geoCluster);
   return { impressionId: event.impressionId, status, earnedMicro: Number(earnedMicro), reasons };
 }
 
@@ -219,6 +222,7 @@ async function persist(
   reasons: string[],
   earnedMicro: bigint,
   campaignId: string | null,
+  geoCluster: string = "XX-UNKNOWN",
 ): Promise<void> {
   if (!campaignId) return;
   await ctx.db
@@ -235,6 +239,9 @@ async function persist(
       submittedAt: new Date(event.submittedAt),
       aiWaitDurationMs: Math.round(event.aiWaitDurationMs),
       cumulativeVisibleMs: Math.round(event.cumulativeVisibleMs),
+      hoverMs: Math.round(event.hoverMs ?? 0),
+      hoverIntentional: event.hoverIntentional ?? false,
+      geoCluster,
       earned: status === "verified",
       earnedMicro,
       status,

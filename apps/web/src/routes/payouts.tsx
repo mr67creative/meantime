@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { PAYOUT_THRESHOLD_USD, type UserBalance } from "@meantime/shared";
 import { api } from "../lib/api";
 import { formatMicroCents } from "../lib/format";
+import { Shell, PageHeader } from "../lib/shell";
 
 export const Route = createFileRoute("/payouts")({
   component: Payouts,
@@ -48,59 +49,47 @@ function Payouts() {
   }
 
   return (
-    <main className="mx-auto max-w-xl space-y-6 p-6">
-      <h1 className="text-2xl font-bold">Withdraw earnings</h1>
+    <Shell>
+      <PageHeader title="Withdraw" description="Minimum $5.00. Every payout passes a fraud audit first." />
 
-      <div className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
-        <p className="text-sm text-neutral-500">Available balance</p>
-        <p className="mt-1 text-3xl font-bold">
-          {balance ? formatMicroCents(balance.availableMicro) : "—"}
-        </p>
-        <p className="mt-1 text-sm text-neutral-500">
-          Minimum withdrawal: {formatMicroCents(PAYOUT_THRESHOLD_USD)}
+      <div className="grid max-w-2xl grid-cols-1 gap-6">
+        <div className="card-pad">
+          <p className="text-[13px] text-neutral-500">Available balance</p>
+          <p className="tabular mt-1 text-3xl font-semibold tracking-tight">
+            {balance ? formatMicroCents(balance.availableMicro) : "—"}
+          </p>
+          <p className="mt-1 text-sm text-neutral-400">
+            Minimum withdrawal {formatMicroCents(PAYOUT_THRESHOLD_USD)}
+          </p>
+        </div>
+
+        <form onSubmit={request} className="card-pad space-y-4">
+          <div>
+            <label className="label">Payout method</label>
+            <select value={method} onChange={(e) => setMethod(e.target.value)} className="input">
+              {METHODS.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label">Destination address or email</label>
+            <input required value={address} onChange={(e) => setAddress(e.target.value)}
+              placeholder="you@example.com or wallet address" className="input" />
+          </div>
+          <div className="flex items-center gap-3">
+            <button type="submit" disabled={!canWithdraw || busy} className="btn-primary">
+              {busy ? "Submitting…" : canWithdraw ? "Request payout" : "Below $5.00 threshold"}
+            </button>
+            {message && <p className="text-sm text-neutral-500">{message}</p>}
+          </div>
+        </form>
+
+        <p className="text-sm text-neutral-400">
+          The audit only flags bots and multi-account abuse — heavy, legitimate
+          AI use is never penalized.
         </p>
       </div>
-
-      <form onSubmit={request} className="space-y-4 rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
-        <div>
-          <label className="block text-sm font-medium">Payout method</label>
-          <select
-            value={method}
-            onChange={(e) => setMethod(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-          >
-            {METHODS.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-sm font-medium">Destination address / email</label>
-          <input
-            required
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            placeholder="you@example.com or wallet address"
-            className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={!canWithdraw || busy}
-          className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-semibold text-white hover:bg-neutral-700 disabled:opacity-50"
-        >
-          {busy ? "Submitting…" : canWithdraw ? "Request payout" : "Below $5.00 threshold"}
-        </button>
-        {message && <p className="text-sm text-neutral-600">{message}</p>}
-      </form>
-
-      <p className="text-sm text-neutral-500">
-        Every payout passes a pre-payout fraud audit. Fast, heavy AI users are
-        never penalized — the audit only flags bots, replayed impressions, and
-        multi-account bonus farming.
-      </p>
-    </main>
+    </Shell>
   );
 }

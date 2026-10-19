@@ -23,6 +23,8 @@ export const impressionEventSchema = z.object({
   submittedAt: z.number().int().positive(),
   aiWaitDurationMs: z.number().min(0).max(600_000),
   cumulativeVisibleMs: z.number().min(0).max(600_000),
+  hoverMs: z.number().min(0).max(600_000).default(0),
+  hoverIntentional: z.boolean().default(false),
   closedReason: z.enum([
     "stream_started",
     "earned",
@@ -59,6 +61,7 @@ export const campaignInputSchema = z.object({
   dailyBudgetMicro: z.number().int().positive().max(1_000_000_000_000),
   cpiMicro: z.number().int().positive().max(100_000_000),
   targetPlatforms: z.array(z.string().max(32)).min(1).max(8),
+  targetGeoClusters: z.array(z.string().max(16)).max(32).default([]),
   maxPerDayPerUser: z.number().int().min(1).max(20).default(3),
   cooldownSec: z.number().int().min(0).max(86_400).default(1800),
 });

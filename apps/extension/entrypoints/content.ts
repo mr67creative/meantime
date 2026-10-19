@@ -277,6 +277,9 @@ class MeanTimeController {
     const aiMutationVerified = this.firstOutputAt !== null;
     this.firstOutputAt = null;
 
+    const hoverMs = Math.round(widget.hover.hoverMs);
+    const hoverIntentional = widget.hover.intentional;
+
     widget.destroy(reason === "earned");
     this.activeWidget = null;
     this.activeLease = null;
@@ -290,6 +293,8 @@ class MeanTimeController {
       submittedAt: lease.submittedAt,
       aiWaitDurationMs,
       cumulativeVisibleMs,
+      hoverMs,
+      hoverIntentional,
       closedReason: reason,
       earned,
       pohi: {

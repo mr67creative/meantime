@@ -14,6 +14,19 @@ export const SOCIAL_TASK_REWARD_USD = 100_000; // $0.10
 export const MIN_VIEWABLE_MS = 5_000;
 /** Fraction of the ad element that must be visible to accrue time. */
 export const VIEWABILITY_THRESHOLD = 0.75;
+/** A hover only counts as intentional after this much continuous hover time. */
+export const HOVER_INTENT_MIN_MS = 500;
+
+/** Laya auto-moderation score bands (0–100). */
+export const LAYA = {
+  AUTO_APPROVE: 85,
+  AUTO_REJECT: 40,
+  /** Social tasks auto-approve only above this stricter band. */
+  TASK_AUTO_APPROVE: 90,
+} as const;
+
+/** Geo targeting is expressed as coarse clusters, never raw location. */
+export const GEO_CLUSTER_UNKNOWN = "XX-UNKNOWN";
 
 export const EXTENSION_CACHE = {
   MAX_CACHED_ADS: 25,

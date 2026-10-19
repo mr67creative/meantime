@@ -21,11 +21,14 @@ import {
   payoutRequests,
   socialTasks,
   users,
+  advertisers,
 } from "@meantime/shared/db";
 import type { AppContext } from "../context.js";
 import { requireAdvertiser, requireUser } from "../context.js";
 import { ACCOUNTS, balanceOf, postTransfer } from "../ledger.js";
 import { computeTrustScore, verdictFor, logFraud } from "../fraud/trust.js";
+import { moderateCampaign, moderateTask } from "../moderation/laya.js";
+import { resolveGeo, clusterForIp } from "../geo.js";
 
 function s3(ctx: AppContext): S3Client {
   return new S3Client({
@@ -112,6 +115,20 @@ export async function userRoutes(app: FastifyInstance, ctx: AppContext) {
     const { screenshotKey } = req.body as { screenshotKey?: string };
     if (!screenshotKey) return reply.code(400).send({ error: "screenshot_required" });
 
+    const [user] = await ctx.db
+      .select()
+      .from(users)
+      .where(eq(users.id, auth.userId))
+      .limit(1);
+
+    // Laya auto-moderation of the task proof image + claimed URL.
+    const moderation = await moderateTask({
+      postUrl: body.postUrl,
+      taskType: body.taskType,
+      screenshotKey,
+      accountAgeDays: user ? (Date.now() - user.createdAt.getTime()) / 86_400_000 : 0,
+    });
+
     const [task] = await ctx.db
       .insert(socialTasks)
       .values({
@@ -120,9 +137,29 @@ export async function userRoutes(app: FastifyInstance, ctx: AppContext) {
         postUrl: body.postUrl,
         screenshotKey,
         rewardMicro: BigInt(SOCIAL_TASK_REWARD_USD),
+        status: moderation.decision === "auto_approved" ? "approved" : moderation.decision === "auto_rejected" ? "rejected" : "pending",
+        moderationDecision: moderation.decision,
+        moderationScore: moderation.score,
+        moderationReasons: moderation.reasons,
       })
       .returning();
-    return { taskId: task?.id, status: task?.status };
+
+    // Auto-approved tasks credit immediately through the ledger.
+    if (moderation.decision === "auto_approved" && task) {
+      await ctx.db.transaction(async (tx) => {
+        await postTransfer(tx, {
+          entryType: "social_task_reward",
+          from: ACCOUNTS.platformPromoLiability,
+          to: ACCOUNTS.user(auth.userId!),
+          amountMicro: BigInt(SOCIAL_TASK_REWARD_USD),
+          referenceType: "social_task",
+          referenceId: task.id,
+          memo: `Social task (${body.taskType}) auto-approved by Laya`,
+        });
+      });
+    }
+
+    return { taskId: task?.id, status: task?.status, moderation };
   });
 
   app.get("/tasks/mine", async (req, reply) => {
@@ -248,12 +285,48 @@ export async function advertiserRoutes(app: FastifyInstance, ctx: AppContext) {
     const auth = requireAdvertiser(req, reply, ctx.env.JWT_SECRET);
     if (!auth?.advertiserId) return;
     const body = campaignInputSchema.parse(req.body);
+
+    const [advertiser] = await ctx.db
+      .select()
+      .from(advertisers)
+      .where(eq(advertisers.id, auth.advertiserId))
+      .limit(1);
+    const ageDays = advertiser
+      ? (Date.now() - advertiser.createdAt.getTime()) / 86_400_000
+      : 0;
+    const rejected = await ctx.db
+      .select({ count: sql<number>`count(*)` })
+      .from(campaigns)
+      .where(and(eq(campaigns.advertiserId, auth.advertiserId), eq(campaigns.status, "rejected")));
+    const approved = await ctx.db
+      .select({ count: sql<number>`count(*)` })
+      .from(campaigns)
+      .where(and(eq(campaigns.advertiserId, auth.advertiserId), eq(campaigns.status, "active")));
+
+    // Laya auto-moderation.
+    const moderation = await moderateCampaign({
+      headline: body.headline,
+      bodyText: body.bodyText,
+      ctaText: body.ctaText,
+      targetUrl: body.targetUrl,
+      advertiserAgeDays: ageDays,
+      advertiserRejectedCount: Number(rejected[0]?.count ?? 0),
+      advertiserApprovedCount: Number(approved[0]?.count ?? 0),
+    });
+
+    const status =
+      moderation.decision === "auto_approved"
+        ? "active"
+        : moderation.decision === "auto_rejected"
+          ? "rejected"
+          : "draft"; // needs_review sits in draft until a human acts
+
     const [campaign] = await ctx.db
       .insert(campaigns)
       .values({
         advertiserId: auth.advertiserId,
         name: body.name,
-        status: "draft",
+        status,
         headline: body.headline,
         bodyText: body.bodyText,
         ctaText: body.ctaText,
@@ -261,11 +334,16 @@ export async function advertiserRoutes(app: FastifyInstance, ctx: AppContext) {
         dailyBudgetMicro: BigInt(body.dailyBudgetMicro),
         cpiMicro: BigInt(body.cpiMicro),
         targetPlatforms: body.targetPlatforms,
+        targetGeoClusters: body.targetGeoClusters,
         maxPerDayPerUser: body.maxPerDayPerUser,
         cooldownSec: body.cooldownSec,
+        moderationDecision: moderation.decision,
+        moderationScore: moderation.score,
+        moderationReasons: moderation.reasons,
+        moderatedAt: new Date(),
       })
       .returning();
-    return campaign;
+    return { campaign, moderation };
   });
 
   app.post("/advertiser/campaigns/:id/activate", async (req, reply) => {
@@ -334,7 +412,96 @@ export async function advertiserRoutes(app: FastifyInstance, ctx: AppContext) {
       return reply.code(400).send({ error: "invalid" });
     }
     if (!campaignId) return reply.code(400).send({ error: "invalid" });
-    await ctx.db.insert(clickEvents).values({ impressionId, campaignId, userId: auth.userId });
+    // Geo from request IP; raw IP is resolved to a cluster and discarded.
+    const geo = resolveGeo(req.ip);
+    await ctx.db
+      .insert(clickEvents)
+      .values({ impressionId, campaignId, userId: auth.userId, geoCluster: geo.cluster });
     return { ok: true };
+  });
+
+  /* ------------------- advertiser analytics (per geo) ------------------- */
+  app.get("/advertiser/campaigns/:id/analytics", async (req, reply) => {
+    const auth = requireAdvertiser(req, reply, ctx.env.JWT_SECRET);
+    if (!auth?.advertiserId) return;
+    const { id } = req.params as { id: string };
+
+    const [campaign] = await ctx.db.select().from(campaigns).where(eq(campaigns.id, id)).limit(1);
+    if (!campaign || campaign.advertiserId !== auth.advertiserId) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+
+    const [totals] = await ctx.db
+      .select({
+        views: sql<number>`count(*)`,
+        verifiedViews: sql<number>`count(*) filter (where ${impressions.earned})`,
+        uniqueUsers: sql<number>`count(distinct ${impressions.userId})`,
+        intentionalHovers: sql<number>`count(*) filter (where ${impressions.hoverIntentional})`,
+        avgRetentionMs: sql<number>`coalesce(avg(${impressions.cumulativeVisibleMs}), 0)`,
+      })
+      .from(impressions)
+      .where(eq(impressions.campaignId, id));
+    const [clicks] = await ctx.db
+      .select({ count: sql<number>`count(*)` })
+      .from(clickEvents)
+      .where(eq(clickEvents.campaignId, id));
+
+    const views = Number(totals?.views ?? 0);
+    const clicksCount = Number(clicks?.count ?? 0);
+
+    // Per-geo-cluster breakdown. Only cluster labels and counts — never IPs.
+    const geoRows = await ctx.db
+      .select({
+        geoCluster: impressions.geoCluster,
+        uniqueUsers: sql<number>`count(distinct ${impressions.userId})`,
+        views: sql<number>`count(*)`,
+        verifiedViews: sql<number>`count(*) filter (where ${impressions.earned})`,
+        intentionalHovers: sql<number>`count(*) filter (where ${impressions.hoverIntentional})`,
+        totalHoverMs: sql<number>`coalesce(sum(${impressions.hoverMs}), 0)`,
+        avgRetentionMs: sql<number>`coalesce(avg(${impressions.cumulativeVisibleMs}), 0)`,
+      })
+      .from(impressions)
+      .where(eq(impressions.campaignId, id))
+      .groupBy(impressions.geoCluster);
+
+    const geoClicks = await ctx.db
+      .select({
+        geoCluster: clickEvents.geoCluster,
+        clicks: sql<number>`count(*)`,
+      })
+      .from(clickEvents)
+      .where(eq(clickEvents.campaignId, id))
+      .groupBy(clickEvents.geoCluster);
+    const clicksByGeo = new Map(geoClicks.map((r) => [r.geoCluster ?? "XX-UNKNOWN", Number(r.clicks)]));
+
+    const geo = geoRows.map((r) => {
+      const cluster = r.geoCluster ?? "XX-UNKNOWN";
+      return {
+        geoCluster: cluster,
+        uniqueUsers: Number(r.uniqueUsers),
+        views: Number(r.views),
+        verifiedViews: Number(r.verifiedViews),
+        intentionalHovers: Number(r.intentionalHovers),
+        totalHoverMs: Number(r.totalHoverMs),
+        clicks: clicksByGeo.get(cluster) ?? 0,
+        avgRetentionMs: Math.round(Number(r.avgRetentionMs)),
+      };
+    });
+
+    return {
+      campaignId: id,
+      totals: {
+        views,
+        verifiedViews: Number(totals?.verifiedViews ?? 0),
+        uniqueUsers: Number(totals?.uniqueUsers ?? 0),
+        intentionalHovers: Number(totals?.intentionalHovers ?? 0),
+        clicks: clicksCount,
+        ctr: views > 0 ? clicksCount / views : 0,
+        avgRetentionMs: Math.round(Number(totals?.avgRetentionMs ?? 0)),
+        completionRate: views > 0 ? Number(totals?.verifiedViews ?? 0) / views : 0,
+        spendMicro: Number(campaign.spentTotalMicro),
+      },
+      geo,
+    };
   });
 }

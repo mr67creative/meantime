@@ -19,12 +19,30 @@ import {
   adLeases,
   campaigns,
   devices,
+  userNetworkEvents,
   users,
 } from "@meantime/shared/db";
 import type { AppContext } from "../context.js";
 import { randomToken, signAuthToken, requireUser } from "../context.js";
 import { ACCOUNTS, postTransfer } from "../ledger.js";
 import { pacingFor } from "../fraud/cadence.js";
+import { clusterForIp, resolveGeo } from "../geo.js";
+
+/** Record a geo/network signal for fraud scoring. Raw IP is hashed, never stored. */
+async function recordNetworkEvent(ctx: AppContext, userId: string, ip: string): Promise<void> {
+  const geo = resolveGeo(ip);
+  const today = new Date().toISOString().slice(0, 10);
+  await ctx.db
+    .insert(userNetworkEvents)
+    .values({
+      userId,
+      ipHash: geo.ipHash,
+      geoCluster: geo.cluster,
+      asn: geo.asn,
+      seenOn: today,
+    })
+    .onConflictDoNothing();
+}
 
 export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
   app.post("/auth/register", async (req, reply) => {
@@ -66,6 +84,7 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
     });
 
     const accessToken = signAuthToken({ sub: user.id, kind: "user", did: deviceId ?? undefined }, ctx.env.JWT_SECRET, 3600 * 24 * 30);
+    await recordNetworkEvent(ctx, user.id, ip);
     return { userId: user.id, deviceId, accessToken, refreshToken: randomToken() };
   });
 
@@ -89,6 +108,7 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
       deviceId = device?.id ?? null;
     }
     const accessToken = signAuthToken({ sub: user.id, kind: "user", did: deviceId ?? undefined }, ctx.env.JWT_SECRET, 3600 * 24 * 30);
+    await recordNetworkEvent(ctx, user.id, req.ip);
     return { userId: user.id, deviceId, accessToken, refreshToken: randomToken() };
   });
 }
@@ -121,8 +141,11 @@ export async function adsRoutes(app: FastifyInstance, ctx: AppContext) {
       return empty;
     }
 
-    // Eligible campaigns: active, budget remaining today, platform-targeted.
+    // Eligible campaigns: active, budget remaining today, platform- and
+    // geo-targeted. Geo is matched on the request IP's cluster; the raw IP
+    // is never stored or returned.
     const today = new Date().toISOString().slice(0, 10);
+    const userCluster = clusterForIp(req.ip);
     const rows = await ctx.db
       .select()
       .from(campaigns)
@@ -136,6 +159,8 @@ export async function adsRoutes(app: FastifyInstance, ctx: AppContext) {
         const targets = c.targetPlatforms as string[];
         if (!targets.some((p) => body.platforms.includes(p))) return false;
       }
+      const geoTargets = (c.targetGeoClusters as string[]) ?? [];
+      if (geoTargets.length > 0 && !geoTargets.includes(userCluster)) return false;
       return true;
     });
 

@@ -45,6 +45,11 @@ export const campaignStatusEnum = pgEnum("campaign_status", [
   "exhausted",
   "rejected",
 ]);
+export const moderationDecisionEnum = pgEnum("moderation_decision", [
+  "auto_approved",
+  "auto_rejected",
+  "needs_review",
+]);
 export const ledgerEntryTypeEnum = pgEnum("ledger_entry_type", [
   "welcome_bonus",
   "ad_revenue_share",
@@ -115,6 +120,30 @@ export const authSessions = pgTable(
   (t) => [index("auth_sessions_user_idx").on(t.userId)],
 );
 
+/**
+ * Geo-diversity signal for fraud scoring. Each row records a distinct
+ * (geo cluster, ASN, day) a user authenticated from — the raw IP is hashed
+ * for equality checks and never stored in plaintext.
+ */
+export const userNetworkEvents = pgTable(
+  "user_network_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    ipHash: text("ip_hash").notNull(),
+    geoCluster: text("geo_cluster").notNull(),
+    asn: integer("asn"),
+    seenOn: text("seen_on").notNull(), // YYYY-MM-DD
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("user_network_events_dedup").on(t.userId, t.ipHash, t.seenOn),
+    index("user_network_events_user_idx").on(t.userId, t.createdAt),
+  ],
+);
+
 export const advertisers = pgTable(
   "advertisers",
   {
@@ -146,6 +175,13 @@ export const campaigns = pgTable(
     /** Bid per verified 5s view, micro-dollars. */
     cpiMicro: bigint("cpi_micro", { mode: "bigint" }).notNull(),
     targetPlatforms: jsonb("target_platforms").$type<string[]>().notNull().default([]),
+    /** Geo clusters to serve in (e.g. ["NA-EAST","EU-WEST"]); empty = worldwide. */
+    targetGeoClusters: jsonb("target_geo_clusters").$type<string[]>().notNull().default([]),
+    /** Laya auto-moderation outcome, recorded at creation. */
+    moderationDecision: moderationDecisionEnum("moderation_decision"),
+    moderationScore: integer("moderation_score"),
+    moderationReasons: jsonb("moderation_reasons").$type<string[]>().notNull().default([]),
+    moderatedAt: timestamp("moderated_at", { withTimezone: true }),
     maxPerDayPerUser: integer("max_per_day_per_user").notNull().default(3),
     cooldownSec: integer("cooldown_sec").notNull().default(1800),
     spentTodayMicro: bigint("spent_today_micro", { mode: "bigint" }).notNull().default(0n),
@@ -224,6 +260,10 @@ export const impressions = pgTable(
     submittedAt: timestamp("submitted_at", { withTimezone: true }).notNull(),
     aiWaitDurationMs: integer("ai_wait_duration_ms").notNull(),
     cumulativeVisibleMs: integer("cumulative_visible_ms").notNull(),
+    hoverMs: integer("hover_ms").notNull().default(0),
+    hoverIntentional: boolean("hover_intentional").notNull().default(false),
+    /** Coarse geo cluster resolved server-side from the client IP. Never a raw IP. */
+    geoCluster: text("geo_cluster"),
     earned: boolean("earned").notNull(),
     earnedMicro: bigint("earned_micro", { mode: "bigint" }).notNull().default(0n),
     status: impressionStatusEnum("status").notNull(),
@@ -273,6 +313,10 @@ export const socialTasks = pgTable(
     screenshotKey: text("screenshot_key").notNull(),
     status: taskStatusEnum("status").notNull().default("pending"),
     rewardMicro: bigint("reward_micro", { mode: "bigint" }).notNull().default(100_000n),
+    /** Laya auto-moderation outcome for the submitted proof. */
+    moderationDecision: moderationDecisionEnum("moderation_decision"),
+    moderationScore: integer("moderation_score"),
+    moderationReasons: jsonb("moderation_reasons").$type<string[]>().notNull().default([]),
     reviewerNotes: text("reviewer_notes"),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -345,6 +389,8 @@ export const clickEvents = pgTable(
       .notNull()
       .references(() => campaigns.id, { onDelete: "cascade" }),
     userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    /** Coarse geo cluster from the click request's IP; raw IP never stored. */
+    geoCluster: text("geo_cluster"),
     clickedAt: timestamp("clicked_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("click_events_campaign_idx").on(t.campaignId, t.clickedAt)],

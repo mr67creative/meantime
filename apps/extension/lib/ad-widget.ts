@@ -1,6 +1,7 @@
 import type { PrefetchedAd } from "@meantime/shared";
 import { MIN_VIEWABLE_MS } from "@meantime/shared";
 import { ViewportTimer } from "./viewport-timer";
+import { HoverTracker } from "./hover-tracker";
 
 const CSS = `
 :host { all: initial; }
@@ -68,6 +69,7 @@ export class AdWidget {
   private readonly earnedBadge: HTMLSpanElement;
   private readonly menu: HTMLDivElement;
   readonly timer: ViewportTimer;
+  readonly hover: HoverTracker;
   private disposed = false;
 
   constructor(
@@ -157,6 +159,7 @@ export class AdWidget {
     this.shadow.append(style, this.wrap);
 
     this.timer = new ViewportTimer(this.host);
+    this.hover = new HoverTracker(this.host);
     this.timer.onEarned = () => {
       this.progressBar.style.width = "100%";
       this.earnedBadge.classList.remove("mt-hidden");
@@ -167,6 +170,7 @@ export class AdWidget {
   mount(parent: HTMLElement): void {
     parent.append(this.host);
     this.timer.start();
+    this.hover.start();
     this.animateProgress();
   }
 
@@ -185,6 +189,7 @@ export class AdWidget {
     if (this.disposed) return;
     this.disposed = true;
     this.timer.destroy();
+    this.hover.destroy();
     const remove = () => this.host.remove();
     if (earnedFade) {
       this.wrap.classList.add("mt-fade");

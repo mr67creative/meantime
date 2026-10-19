@@ -5,6 +5,7 @@ import {
   fraudLogs,
   impressions,
   payoutDestinations,
+  userNetworkEvents,
   users,
 } from "@meantime/shared/db";
 
@@ -22,19 +23,32 @@ export async function computeTrustScore(db: Db, userId: string): Promise<TrustSc
   const ageDays = (Date.now() - user.createdAt.getTime()) / 86_400_000;
   const accountAgeScore = Math.min(20, Math.round((ageDays / 14) * 20));
 
-  // 2. Network: signup ASN/IP shared with other accounts is a sybil signal.
+  // 2. Network: signup IP shared with other accounts is a sybil signal, and
+  //    implausible geo diversity over a short window is a bot-farm signal.
   const sharedIp = await db
     .select({ count: sql<number>`count(*)` })
     .from(users)
     .where(and(eq(users.signupIp, user.signupIp ?? ""), sql`${users.id} <> ${userId}`));
   const sharedCount = Number(sharedIp[0]?.count ?? 0);
-  const networkScore = user.signupIp
+  let networkScore = user.signupIp
     ? sharedCount === 0
       ? 20
       : sharedCount === 1
         ? 10
         : 0
     : 10; // unknown IP: neutral
+
+  // Geo-velocity: distinct geo clusters over the last 14 days. Humans stay in
+  // one or two; a farm account hopping clusters daily scores lower.
+  const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000);
+  const geoRows = await db
+    .select({ cluster: userNetworkEvents.geoCluster })
+    .from(userNetworkEvents)
+    .where(and(eq(userNetworkEvents.userId, userId), gte(userNetworkEvents.createdAt, fourteenDaysAgo)));
+  const distinctClusters = new Set(geoRows.map((r) => r.cluster)).size;
+  if (distinctClusters >= 8) networkScore = 0;
+  else if (distinctClusters >= 5) networkScore = Math.min(networkScore, 5);
+  else if (distinctClusters >= 3) networkScore = Math.min(networkScore, 12);
 
   // 3. Payout destination uniqueness: one address = one account.
   const dests = await db

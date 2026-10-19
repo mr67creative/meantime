@@ -68,3 +68,36 @@ pnpm --filter @meantime/extension build
    silent cap) protect advertisers without falsely banning power users.
 5. **Pre-withdrawal sybil check** — composite trust score over account age,
    IP/ASN diversity, payout-address uniqueness, PoHI ratio, and cadence.
+
+## Laya auto-moderation
+
+Campaigns and social-task proofs are moderated by [Laya](#), an open-source,
+non-chat AI that runs in Docker as a local sidecar (`laya` service in
+`docker-compose.yml`). Because it's non-chat, it takes structured input and
+returns a score and labels rather than free text — nothing is sent to a
+third-party API.
+
+The API calls `POST {LAYA_ENDPOINT}/v1/classify` with the ad copy (or the task
+proof image + URL) and blends the returned 0–100 score with lightweight
+reputation signals. Above the auto-approve threshold a submission goes live
+instantly; below the auto-reject floor it's refused; the middle band routes
+to a human reviewer.
+
+Security boundary: deterministic policy checks (blocked terms, malformed
+URLs) run *before* Laya and can hard-reject clear-cut abuse without consulting
+the model — and if Laya is slow or unreachable, the service fails safe to
+**"needs_review"**, never to auto-approve. A Laya outage can never push bad
+content live.
+
+## Geo targeting & analytics
+
+The server resolves each request's IP to a coarse geo cluster (e.g.
+`NA-EAST`, `EU-WEST`) in memory and discards the IP — impressions and click
+events store only the cluster label. Advertisers target campaigns by cluster
+and see a per-cluster breakdown (unique users, views, verified views,
+intentional hovers, clicks, average retention). **The raw IP is never stored
+in plaintext and never reaches the client.**
+
+Hover is tracked only when intentional: a contiguous hover must last at least
+500ms before it accrues time, so the advertiser metric reflects real attention
+rather than pass-throughs on the way to a control.

@@ -68,6 +68,10 @@ export interface ImpressionEvent {
   aiWaitDurationMs: number;
   /** Cumulative active-viewport ms, capped by teardown. */
   cumulativeVisibleMs: number;
+  /** Total ms of intentional hover (each contiguous hover >= 500ms). */
+  hoverMs: number;
+  /** True when at least one intentional hover occurred. */
+  hoverIntentional: boolean;
   closedReason: CloseReason;
   earned: boolean;
   pohi: PohiSignals;
@@ -141,6 +145,46 @@ export interface CampaignInput {
   dailyBudgetMicro: number;
   cpiMicro: number;
   targetPlatforms: string[];
+  /** Geo clusters the campaign should serve in; empty = worldwide. */
+  targetGeoClusters: string[];
+}
+
+export type ModerationDecision = "auto_approved" | "auto_rejected" | "needs_review";
+
+export interface ModerationOutcome {
+  score: number;
+  decision: ModerationDecision;
+  reasons: string[];
+  /** Which checks ran — "policy", "reputation", "llm". */
+  layers: string[];
+}
+
+export interface GeoClusterBreakdown {
+  geoCluster: string;
+  uniqueUsers: number;
+  views: number;
+  verifiedViews: number;
+  intentionalHovers: number;
+  totalHoverMs: number;
+  clicks: number;
+  avgRetentionMs: number;
+}
+
+export interface CampaignAnalytics {
+  campaignId: string;
+  totals: {
+    views: number;
+    verifiedViews: number;
+    uniqueUsers: number;
+    intentionalHovers: number;
+    clicks: number;
+    ctr: number;
+    avgRetentionMs: number;
+    completionRate: number;
+    spendMicro: number;
+  };
+  /** Aggregated per geo cluster. IPs are never stored or returned. */
+  geo: GeoClusterBreakdown[];
 }
 
 export interface CampaignStats {
