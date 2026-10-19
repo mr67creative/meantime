@@ -69,6 +69,20 @@ pnpm --filter @meantime/extension build
 5. **Pre-withdrawal sybil check** — composite trust score over account age,
    IP/ASN diversity, payout-address uniqueness, PoHI ratio, and cadence.
 
+## Growth & experimentation
+
+**Referrals.** Every user gets a referral link (`/referrals`). A $0.50 bonus
+vests for the referrer only when the referred user earns **$1.00 in verified
+ad views** — an account that signs up and never genuinely uses the product
+pays nothing, which makes bonus-farming unprofitable. Self-referrals are
+blocked by salted-IP-hash overlap and device-fingerprint match.
+
+**A/B creative testing.** Campaigners can add up to 2 extra variants (A/B/C)
+per campaign from the advertiser portal. Each variant is moderated by Laya
+independently and rotates in only once approved; all variants share the
+campaign's budget and bid, so an experiment can never overspend. The portal
+shows per-variant views, completion rate, and retention.
+
 ## Laya auto-moderation
 
 Campaigns and social-task proofs are moderated by [Laya](#), an open-source,

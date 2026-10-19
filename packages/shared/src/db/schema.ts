@@ -54,10 +54,17 @@ export const ledgerEntryTypeEnum = pgEnum("ledger_entry_type", [
   "welcome_bonus",
   "ad_revenue_share",
   "social_task_reward",
+  "referral_bonus",
   "advertiser_deposit",
   "advertiser_spend",
   "payout_debit",
   "adjustment",
+]);
+export const referralStatusEnum = pgEnum("referral_status", [
+  "pending",
+  "qualified",
+  "paid",
+  "void",
 ]);
 export const fraudSeverityEnum = pgEnum("fraud_severity", ["info", "warning", "critical"]);
 export const impressionStatusEnum = pgEnum("impression_status", [
@@ -194,6 +201,64 @@ export const campaigns = pgTable(
 );
 
 /**
+ * A/B creative variants. A campaign's own copy is variant "A"; additional
+ * variants (B, C…) are rows here. Each is moderated by Laya independently and
+ * rotates in only once approved. Budgets and bids stay at the campaign level
+ * so variants share one budget — the experiment never overspends.
+ */
+export const campaignVariants = pgTable(
+  "campaign_variants",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    campaignId: uuid("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    label: text("label").notNull(), // "B", "C", …
+    headline: text("headline").notNull(),
+    bodyText: text("body_text").notNull(),
+    ctaText: text("cta_text").notNull(),
+    moderationDecision: moderationDecisionEnum("moderation_decision"),
+    moderationScore: integer("moderation_score"),
+    moderationReasons: jsonb("moderation_reasons").$type<string[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("campaign_variants_campaign_idx").on(t.campaignId)],
+);
+
+/**
+ * Referral attribution. One row per referred user. The bonus vests only when
+ * the referred user crosses REFERRAL_QUALIFY_EARNINGS_USD in verified views,
+ * which makes fake-account farming unprofitable.
+ */
+export const referrals = pgTable(
+  "referrals",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    referrerId: uuid("referrer_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    referredUserId: uuid("referred_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Hashed IP + fingerprint hashes recorded at signup for self-referral checks. */
+    referredIpHash: text("referred_ip_hash"),
+    referredFingerprintHash: text("referred_fingerprint_hash"),
+    status: referralStatusEnum("status").notNull().default("pending"),
+    /** Verified-view earnings the referred user had when last evaluated. */
+    qualifiedEarningsMicro: bigint("qualified_earnings_micro", { mode: "bigint" })
+      .notNull()
+      .default(0n),
+    bonusMicro: bigint("bonus_micro", { mode: "bigint" }).notNull().default(500_000n),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("referrals_referred_uidx").on(t.referredUserId),
+    index("referrals_referrer_idx").on(t.referrerId),
+  ],
+);
+
+/**
  * One lease per (user, campaign, issue) — single-use, consumed when a
  * telemetry event bearing its token is accepted.
  */
@@ -254,6 +319,8 @@ export const impressions = pgTable(
     campaignId: uuid("campaign_id")
       .notNull()
       .references(() => campaigns.id, { onDelete: "cascade" }),
+    /** Which creative variant was served; null = the base (variant A). */
+    variantId: uuid("variant_id").references(() => campaignVariants.id, { onDelete: "set null" }),
     platform: text("platform").notNull(),
     placement: text("placement").notNull(),
     displayMode: text("display_mode").notNull(),

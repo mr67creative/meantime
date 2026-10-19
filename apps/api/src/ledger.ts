@@ -27,6 +27,7 @@ export async function postEntry(
       | "welcome_bonus"
       | "ad_revenue_share"
       | "social_task_reward"
+      | "referral_bonus"
       | "advertiser_deposit"
       | "advertiser_spend"
       | "payout_debit"

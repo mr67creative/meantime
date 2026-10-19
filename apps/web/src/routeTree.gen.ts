@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdvertiserRouteImport } from './routes/advertiser'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as PayoutsRouteImport } from './routes/payouts'
+import { Route as ReferralsRouteImport } from './routes/referrals'
 import { Route as TasksRouteImport } from './routes/tasks'
 
 const IndexRoute = IndexRouteImport.update({
@@ -35,6 +36,11 @@ const PayoutsRoute = PayoutsRouteImport.update({
   path: '/payouts',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ReferralsRoute = ReferralsRouteImport.update({
+  id: '/referrals',
+  path: '/referrals',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TasksRoute = TasksRouteImport.update({
   id: '/tasks',
   path: '/tasks',
@@ -46,6 +52,7 @@ export interface FileRoutesByFullPath {
   '/advertiser': typeof AdvertiserRoute
   '/dashboard': typeof DashboardRoute
   '/payouts': typeof PayoutsRoute
+  '/referrals': typeof ReferralsRoute
   '/tasks': typeof TasksRoute
 }
 export interface FileRoutesByTo {
@@ -53,6 +60,7 @@ export interface FileRoutesByTo {
   '/advertiser': typeof AdvertiserRoute
   '/dashboard': typeof DashboardRoute
   '/payouts': typeof PayoutsRoute
+  '/referrals': typeof ReferralsRoute
   '/tasks': typeof TasksRoute
 }
 export interface FileRoutesById {
@@ -61,14 +69,23 @@ export interface FileRoutesById {
   '/advertiser': typeof AdvertiserRoute
   '/dashboard': typeof DashboardRoute
   '/payouts': typeof PayoutsRoute
+  '/referrals': typeof ReferralsRoute
   '/tasks': typeof TasksRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/advertiser' | '/dashboard' | '/payouts' | '/tasks'
+  fullPaths:
+    '/' | '/advertiser' | '/dashboard' | '/payouts' | '/referrals' | '/tasks'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/advertiser' | '/dashboard' | '/payouts' | '/tasks'
-  id: '__root__' | '/' | '/advertiser' | '/dashboard' | '/payouts' | '/tasks'
+  to: '/' | '/advertiser' | '/dashboard' | '/payouts' | '/referrals' | '/tasks'
+  id:
+    | '__root__'
+    | '/'
+    | '/advertiser'
+    | '/dashboard'
+    | '/payouts'
+    | '/referrals'
+    | '/tasks'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -76,6 +93,7 @@ export interface RootRouteChildren {
   AdvertiserRoute: typeof AdvertiserRoute
   DashboardRoute: typeof DashboardRoute
   PayoutsRoute: typeof PayoutsRoute
+  ReferralsRoute: typeof ReferralsRoute
   TasksRoute: typeof TasksRoute
 }
 
@@ -109,6 +127,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PayoutsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/referrals': {
+      id: '/referrals'
+      path: '/referrals'
+      fullPath: '/referrals'
+      preLoaderRoute: typeof ReferralsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/tasks': {
       id: '/tasks'
       path: '/tasks'
@@ -124,6 +149,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdvertiserRoute: AdvertiserRoute,
   DashboardRoute: DashboardRoute,
   PayoutsRoute: PayoutsRoute,
+  ReferralsRoute: ReferralsRoute,
   TasksRoute: TasksRoute,
 }
 export const routeTree = rootRouteImport

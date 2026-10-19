@@ -15,10 +15,12 @@ import {
 } from "@meantime/shared";
 import {
   campaigns,
+  campaignVariants,
   clickEvents,
   impressions,
   payoutDestinations,
   payoutRequests,
+  referrals,
   socialTasks,
   users,
   advertisers,
@@ -29,6 +31,11 @@ import { ACCOUNTS, balanceOf, postTransfer } from "../ledger.js";
 import { computeTrustScore, verdictFor, logFraud } from "../fraud/trust.js";
 import { moderateCampaign, moderateTask } from "../moderation/laya.js";
 import { resolveGeo, clusterForIp } from "../geo.js";
+import { createHash } from "node:crypto";
+
+function referralCodeFor(userId: string): string {
+  return createHash("sha256").update(`referral:${userId}`).digest("hex").slice(0, 8);
+}
 
 function s3(ctx: AppContext): S3Client {
   return new S3Client({
@@ -278,9 +285,116 @@ export async function userRoutes(app: FastifyInstance, ctx: AppContext) {
 
     return { payoutId: request.id, status: request.status, trustScore: trust.total };
   });
+
+  /* ------------------------------ referrals ----------------------------- */
+  app.get("/me/referrals", async (req, reply) => {
+    const auth = requireUser(req, reply, ctx.env.JWT_SECRET);
+    if (!auth?.userId) return;
+    const code = referralCodeFor(auth.userId);
+    const rows = await ctx.db
+      .select()
+      .from(referrals)
+      .where(eq(referrals.referrerId, auth.userId))
+      .orderBy(desc(referrals.createdAt))
+      .limit(100);
+    const stats = {
+      code,
+      link: `${ctx.env.WEB_ORIGIN}/r/${code}`,
+      total: rows.length,
+      pending: rows.filter((r) => r.status === "pending").length,
+      paid: rows.filter((r) => r.status === "paid").length,
+      earnedMicro: rows
+        .filter((r) => r.status === "paid")
+        .reduce((a, r) => a + Number(r.bonusMicro), 0),
+    };
+    return stats;
+  });
 }
 
 export async function advertiserRoutes(app: FastifyInstance, ctx: AppContext) {
+  app.post("/advertiser/campaigns/:id/variants", async (req, reply) => {
+    const auth = requireAdvertiser(req, reply, ctx.env.JWT_SECRET);
+    if (!auth?.advertiserId) return;
+    const { id } = req.params as { id: string };
+    const [campaign] = await ctx.db.select().from(campaigns).where(eq(campaigns.id, id)).limit(1);
+    if (!campaign || campaign.advertiserId !== auth.advertiserId) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+
+    const body = campaignInputSchema.pick({ headline: true, bodyText: true, ctaText: true }).parse(req.body);
+    const existing = await ctx.db
+      .select({ label: campaignVariants.label })
+      .from(campaignVariants)
+      .where(eq(campaignVariants.campaignId, id));
+    if (existing.length >= 2) {
+      return reply.code(400).send({ error: "max_variants_reached", max: 3 });
+    }
+    const label = existing.length === 0 ? "B" : "C";
+
+    // Each variant goes through Laya independently.
+    const moderation = await moderateCampaign({
+      headline: body.headline,
+      bodyText: body.bodyText,
+      ctaText: body.ctaText,
+      targetUrl: campaign.targetUrl,
+      advertiserAgeDays: 999, // reputation already established by base campaign
+      advertiserRejectedCount: 0,
+      advertiserApprovedCount: 999,
+    });
+
+    const [variant] = await ctx.db
+      .insert(campaignVariants)
+      .values({
+        campaignId: id,
+        label,
+        headline: body.headline,
+        bodyText: body.bodyText,
+        ctaText: body.ctaText,
+        moderationDecision: moderation.decision,
+        moderationScore: moderation.score,
+        moderationReasons: moderation.reasons,
+      })
+      .returning();
+    return { variant, moderation };
+  });
+
+  app.get("/advertiser/campaigns/:id/variants", async (req, reply) => {
+    const auth = requireAdvertiser(req, reply, ctx.env.JWT_SECRET);
+    if (!auth?.advertiserId) return;
+    const { id } = req.params as { id: string };
+    const [campaign] = await ctx.db.select().from(campaigns).where(eq(campaigns.id, id)).limit(1);
+    if (!campaign || campaign.advertiserId !== auth.advertiserId) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    const rows = await ctx.db
+      .select()
+      .from(campaignVariants)
+      .where(eq(campaignVariants.campaignId, id));
+
+    // Per-variant performance.
+    const withStats = await Promise.all(
+      rows.map(async (v) => {
+        const [agg] = await ctx.db
+          .select({
+            views: sql<number>`count(*)`,
+            verifiedViews: sql<number>`count(*) filter (where ${impressions.earned})`,
+            avgRetentionMs: sql<number>`coalesce(avg(${impressions.cumulativeVisibleMs}), 0)`,
+          })
+          .from(impressions)
+          .where(eq(impressions.variantId, v.id));
+        const views = Number(agg?.views ?? 0);
+        return {
+          ...v,
+          views,
+          verifiedViews: Number(agg?.verifiedViews ?? 0),
+          completionRate: views > 0 ? Number(agg?.verifiedViews ?? 0) / views : 0,
+          avgRetentionMs: Math.round(Number(agg?.avgRetentionMs ?? 0)),
+        };
+      }),
+    );
+    return withStats;
+  });
+
   app.post("/advertiser/campaigns", async (req, reply) => {
     const auth = requireAdvertiser(req, reply, ctx.env.JWT_SECRET);
     if (!auth?.advertiserId) return;

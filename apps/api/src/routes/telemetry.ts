@@ -16,6 +16,7 @@ import { ACCOUNTS, postTransfer } from "../ledger.js";
 import { analyzeCadence, type CadenceFinding } from "../fraud/cadence.js";
 import { logFraud } from "../fraud/trust.js";
 import { clusterForIp } from "../geo.js";
+import { maybeQualifyReferral } from "../referrals.js";
 
 export async function telemetryRoutes(app: FastifyInstance, ctx: AppContext) {
   app.post("/telemetry/batch", async (req, reply) => {
@@ -200,6 +201,10 @@ async function processEvent(
           .update(adLeases)
           .set({ consumedAt: new Date(), consumedImpressionId: event.impressionId })
           .where(eq(adLeases.id, lease.lid));
+
+        // Vesting check: pay out a pending referral once the referred user
+        // crosses $1.00 in verified views.
+        await maybeQualifyReferral(ctx.db, userId, tx);
       });
     }
   } else {

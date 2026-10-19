@@ -18,7 +18,9 @@ import {
 import {
   adLeases,
   campaigns,
+  campaignVariants,
   devices,
+  referrals,
   userNetworkEvents,
   users,
 } from "@meantime/shared/db";
@@ -27,6 +29,13 @@ import { randomToken, signAuthToken, requireUser } from "../context.js";
 import { ACCOUNTS, postTransfer } from "../ledger.js";
 import { pacingFor } from "../fraud/cadence.js";
 import { clusterForIp, resolveGeo } from "../geo.js";
+import { checkReferralAllowed } from "../referrals.js";
+import { logFraud } from "../fraud/trust.js";
+import { createHash } from "node:crypto";
+
+function referralCodeFor(userId: string): string {
+  return createHash("sha256").update(`referral:${userId}`).digest("hex").slice(0, 8);
+}
 
 /** Record a geo/network signal for fraud scoring. Raw IP is hashed, never stored. */
 async function recordNetworkEvent(ctx: AppContext, userId: string, ip: string): Promise<void> {
@@ -59,14 +68,48 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
     if (!user) return reply.code(500).send({ error: "create_failed" });
 
     let deviceId: string | null = null;
+    let fingerprintHash: string | null = null;
     if (body.deviceId && body.fingerprintHash) {
-      const fp = await sha256Hex(body.fingerprintHash);
+      fingerprintHash = await sha256Hex(body.fingerprintHash);
       const [device] = await ctx.db
         .insert(devices)
-        .values({ userId: user.id, fingerprintHash: fp, userAgent: req.headers["user-agent"] ?? null })
+        .values({ userId: user.id, fingerprintHash, userAgent: req.headers["user-agent"] ?? null })
         .onConflictDoNothing()
         .returning();
       deviceId = device?.id ?? null;
+    }
+
+    // Referral attribution, with self-referral blocked by network/device checks.
+    if (body.referralCode) {
+      const match = await ctx.db
+        .select({ id: users.id })
+        .from(users)
+        .where(sql`encode(digest('referral:' || ${users.id}::text, 'sha256'), 'hex') LIKE ${body.referralCode.toLowerCase() + "%"}`)
+        .limit(1);
+      const referrer = match[0];
+      if (referrer && referrer.id !== user.id) {
+        const ipHash = resolveGeo(ip).ipHash;
+        const check = await checkReferralAllowed(ctx.db, {
+          referrerId: referrer.id,
+          referredIpHash: ipHash,
+          referredFingerprintHash: fingerprintHash,
+        });
+        if (check.eligible) {
+          await ctx.db.insert(referrals).values({
+            referrerId: referrer.id,
+            referredUserId: user.id,
+            referredIpHash: ipHash,
+            referredFingerprintHash: fingerprintHash,
+          });
+        } else {
+          await logFraud(ctx.db, {
+            userId: user.id,
+            severity: "warning",
+            rule: "self_referral_blocked",
+            detail: { referrerId: referrer.id, reason: check.reason },
+          });
+        }
+      }
     }
 
     // Welcome bonus: promo liability -> pending balance, unlockable at threshold.
@@ -170,6 +213,22 @@ export async function adsRoutes(app: FastifyInstance, ctx: AppContext) {
 
     const ads: PrefetchedAd[] = [];
     for (const campaign of eligible.slice(0, count)) {
+      // A/B rotation: pick the base copy or an approved variant at random.
+      const approvedVariants = await ctx.db
+        .select()
+        .from(campaignVariants)
+        .where(
+          and(
+            eq(campaignVariants.campaignId, campaign.id),
+            eq(campaignVariants.moderationDecision, "auto_approved"),
+          ),
+        );
+      const pick =
+        approvedVariants.length > 0 && Math.random() < approvedVariants.length / (approvedVariants.length + 1)
+          ? approvedVariants[Math.floor(Math.random() * approvedVariants.length)]
+          : null;
+
+      const copy = pick ?? campaign;
       const leaseId = crypto.randomUUID();
       const payload: LeaseTokenPayload = {
         v: 1,
@@ -192,14 +251,16 @@ export async function adsRoutes(app: FastifyInstance, ctx: AppContext) {
       ads.push({
         adId: campaign.id,
         campaignId: campaign.id,
+        variantId: pick?.id ?? null,
+        variantLabel: pick?.label ?? "A",
         leaseId,
         leaseToken,
         issuedAt: nowSec,
         expiresAt: nowSec + LEASE.TTL_SECONDS,
         cpiMicro: Number(campaign.cpiMicro),
-        headline: campaign.headline,
-        bodyText: campaign.bodyText,
-        ctaText: campaign.ctaText,
+        headline: copy.headline,
+        bodyText: copy.bodyText,
+        ctaText: copy.ctaText,
         targetUrl: campaign.targetUrl,
         frequencyCap: {
           maxPerDay: campaign.maxPerDayPerUser,

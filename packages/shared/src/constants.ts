@@ -10,6 +10,16 @@ export const PAYOUT_THRESHOLD_USD = 5_000_000; // $5.00 in micro-dollars
 export const WELCOME_BONUS_USD = 1_000_000; // $1.00
 export const SOCIAL_TASK_REWARD_USD = 100_000; // $0.10
 
+/**
+ * Referral program. The bonus vests only after the referred user earns
+ * REFERRAL_QUALIFY_EARNINGS_USD in *verified* ad views — an account that
+ * signs up and never really uses the product pays nothing, which kills
+ * bonus-farming economics.
+ */
+export const REFERRAL_BONUS_USD = 500_000; // $0.50 to the referrer
+export const REFERRAL_QUALIFY_EARNINGS_USD = 1_000_000; // $1.00 verified
+export const MAX_CAMPAIGN_VARIANTS = 3;
+
 /** Cumulative active-viewport time required for an impression to be paid. */
 export const MIN_VIEWABLE_MS = 5_000;
 /** Fraction of the ad element that must be visible to accrue time. */

@@ -62,6 +62,24 @@ async function init(): Promise<void> {
     // service worker asleep — leave dashes
   }
 
+  // Live earnings — what a user actually cares about in the popup.
+  const statBalance = document.getElementById("stat-balance") as HTMLElement;
+  try {
+    const identity = await chrome.storage.local.get("identity");
+    const id = identity["identity"] as { accessToken?: string } | undefined;
+    if (id?.accessToken) {
+      const res = await fetch("http://localhost:3001/me/balance", {
+        headers: { Authorization: `Bearer ${id.accessToken}` },
+      });
+      if (res.ok) {
+        const balance = (await res.json()) as { availableMicro: number };
+        statBalance.textContent = `$${(balance.availableMicro / 1_000_000).toFixed(2)}`;
+      }
+    }
+  } catch {
+    // offline — leave dash
+  }
+
   document.getElementById("open-dashboard")?.addEventListener("click", () => {
     void chrome.tabs.create({ url: "http://localhost:3000/dashboard" });
   });

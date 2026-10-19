@@ -30,12 +30,29 @@ interface CampaignRow {
   moderationDecision?: string;
 }
 
+interface VariantRow {
+  id: string;
+  label: string;
+  headline: string;
+  bodyText: string;
+  ctaText: string;
+  moderationDecision?: string;
+  views: number;
+  verifiedViews: number;
+  completionRate: number;
+  avgRetentionMs: number;
+}
+
 function AdvertiserPortal() {
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [analytics, setAnalytics] = useState<CampaignAnalytics | null>(null);
+  const [variants, setVariants] = useState<VariantRow[]>([]);
   const [moderation, setModeration] = useState<ModerationOutcome | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [showVariantForm, setShowVariantForm] = useState(false);
+  const [variantForm, setVariantForm] = useState({ headline: "", bodyText: "", ctaText: "Learn more" });
+  const [variantMsg, setVariantMsg] = useState<string | null>(null);
 
   const [form, setForm] = useState<CampaignInput>({
     name: "",
@@ -63,6 +80,9 @@ function AdvertiserPortal() {
     api<CampaignAnalytics>(`/advertiser/campaigns/${selected}/analytics`)
       .then(setAnalytics)
       .catch(() => setAnalytics(null));
+    api<VariantRow[]>(`/advertiser/campaigns/${selected}/variants`)
+      .then(setVariants)
+      .catch(() => setVariants([]));
   }, [selected]);
 
   async function createCampaign(e: React.FormEvent): Promise<void> {
@@ -86,6 +106,31 @@ function AdvertiserPortal() {
       setSelected(res.campaign.id);
     } catch (err) {
       setMessage(String(err));
+    }
+  }
+
+  async function createVariant(e: React.FormEvent): Promise<void> {
+    e.preventDefault();
+    if (!selected) return;
+    setVariantMsg(null);
+    try {
+      const res = await api<{ moderation: ModerationOutcome }>(
+        `/advertiser/campaigns/${selected}/variants`,
+        { method: "POST", json: variantForm },
+      );
+      setVariantMsg(
+        res.moderation.decision === "auto_approved"
+          ? "Variant approved and now rotating."
+          : res.moderation.decision === "needs_review"
+            ? "Variant sent to review."
+            : "Variant rejected.",
+      );
+      setShowVariantForm(false);
+      setVariantForm({ headline: "", bodyText: "", ctaText: "Learn more" });
+      const rows = await api<VariantRow[]>(`/advertiser/campaigns/${selected}/variants`);
+      setVariants(rows);
+    } catch (err) {
+      setVariantMsg(String(err));
     }
   }
 
@@ -225,7 +270,14 @@ function AdvertiserPortal() {
 
           {analytics && (
             <section className="space-y-4">
-              <h2 className="text-sm font-semibold text-neutral-900">Analytics</h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-neutral-900">Analytics</h2>
+                {!showVariantForm && variants.length < 2 && (
+                  <button onClick={() => setShowVariantForm(true)} className="btn-outline text-xs">
+                    Add A/B variant
+                  </button>
+                )}
+              </div>
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                 <Stat label="Views" value={String(analytics.totals.views)} />
                 <Stat label="Verified 5s views" value={String(analytics.totals.verifiedViews)}
@@ -234,6 +286,66 @@ function AdvertiserPortal() {
                 <Stat label="Clicks" value={String(analytics.totals.clicks)}
                   hint={`${(analytics.totals.ctr * 100).toFixed(2)}% CTR`} />
               </div>
+
+              {/* A/B variants */}
+              <div>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                  Creative variants
+                </h3>
+                <Table head={["Variant", "Headline", "Views", "Completion", "Avg retention", "Status"]}>
+                  <tr>
+                    <td className="px-4 py-3 font-medium text-neutral-900">A</td>
+                    <td className="max-w-[180px] truncate px-4 py-3">{campaigns.find((c) => c.id === selected)?.headline}</td>
+                    <td className="tabular px-4 py-3">—</td>
+                    <td className="tabular px-4 py-3">—</td>
+                    <td className="tabular px-4 py-3">—</td>
+                    <td className="px-4 py-3"><Badge tone="good">base</Badge></td>
+                  </tr>
+                  {variants.map((v) => (
+                    <tr key={v.id}>
+                      <td className="px-4 py-3 font-medium text-neutral-900">{v.label}</td>
+                      <td className="max-w-[180px] truncate px-4 py-3">{v.headline}</td>
+                      <td className="tabular px-4 py-3">{v.views}</td>
+                      <td className="tabular px-4 py-3">{(v.completionRate * 100).toFixed(0)}%</td>
+                      <td className="tabular px-4 py-3">{formatMs(v.avgRetentionMs)}</td>
+                      <td className="px-4 py-3">
+                        <Badge tone={
+                          v.moderationDecision === "auto_approved" ? "good"
+                          : v.moderationDecision === "needs_review" ? "warn" : "bad"
+                        }>
+                          {v.moderationDecision?.replace("_", " ") ?? "—"}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </Table>
+              </div>
+
+              {showVariantForm && (
+                <form onSubmit={createVariant} className="card-pad space-y-3">
+                  <h4 className="text-sm font-semibold text-neutral-900">New variant (B)</h4>
+                  <div>
+                    <label className="label">Headline</label>
+                    <input required maxLength={AD_COPY_LIMITS.HEADLINE_MAX} value={variantForm.headline}
+                      onChange={(e) => setVariantForm({ ...variantForm, headline: e.target.value })} className="input" />
+                  </div>
+                  <div>
+                    <label className="label">Body</label>
+                    <textarea required maxLength={AD_COPY_LIMITS.BODY_MAX} rows={2} value={variantForm.bodyText}
+                      onChange={(e) => setVariantForm({ ...variantForm, bodyText: e.target.value })} className="input" />
+                  </div>
+                  <div>
+                    <label className="label">CTA text</label>
+                    <input required maxLength={AD_COPY_LIMITS.CTA_MAX} value={variantForm.ctaText}
+                      onChange={(e) => setVariantForm({ ...variantForm, ctaText: e.target.value })} className="input" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button type="submit" className="btn-primary">Submit variant</button>
+                    <button type="button" onClick={() => setShowVariantForm(false)} className="btn-ghost">Cancel</button>
+                  </div>
+                  {variantMsg && <p className="text-sm text-neutral-500">{variantMsg}</p>}
+                </form>
+              )}
 
               <div>
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">

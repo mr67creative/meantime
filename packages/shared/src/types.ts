@@ -24,6 +24,9 @@ export interface FrequencyCapMeta {
 export interface PrefetchedAd {
   adId: string;
   campaignId: string;
+  /** Which creative variant this is; null/undefined = base copy. */
+  variantId?: string | null;
+  variantLabel?: string;
   leaseId: string;
   /** Base64url payload || "." || base64url HMAC-SHA256 signature. */
   leaseToken: string;
